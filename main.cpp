@@ -16,6 +16,8 @@
 #define I2S_PIN_CLK  3 // BCLK=3, LRCLK=4
 
 static daisysp::Oscillator osc;
+static daisysp::Oscillator lfo;
+static daisysp::Adsr env;
 static volatile bool gate = false;
 static volatile float osc_freq = 440.0f;
 
@@ -69,8 +71,19 @@ int main() {
     tusb_init();
 
     osc.Init(SAMPLE_RATE);
-    osc.SetWaveform(daisysp::Oscillator::WAVE_SIN);
-    osc.SetAmp(0.5f);
+    osc.SetWaveform(daisysp::Oscillator::WAVE_POLYBLEP_SQUARE);
+    osc.SetAmp(1.0f);
+
+    lfo.Init(SAMPLE_RATE);
+    lfo.SetWaveform(daisysp::Oscillator::WAVE_TRI);
+    lfo.SetFreq(0.4f); // Hz
+    lfo.SetAmp(1.0f);
+
+    env.Init(SAMPLE_RATE);
+    env.SetAttackTime(0.01f);
+    env.SetDecayTime(0.1f);
+    env.SetSustainLevel(0.7f);
+    env.SetReleaseTime(0.3f);
 
     audio_buffer_pool_t* pool = audio_init();
 
@@ -81,9 +94,14 @@ int main() {
         if(!buf) continue;
 
         osc.SetFreq(osc_freq);
+        bool g = gate;
         int16_t* samples = (int16_t*)buf->buffer->bytes;
         for(uint32_t i = 0; i < buf->max_sample_count; i++) {
-            int16_t val = gate ? (int16_t)(osc.Process() * 32767.0f) : 0;
+            // LFO -1..1 → pw 0.15..0.85 (не доходим до краёв чтобы не было артефактов)
+            float pw = 0.5f + lfo.Process() * 0.35f;
+            osc.SetPw(pw);
+            float amplitude = env.Process(g);
+            int16_t val = (int16_t)(osc.Process() * amplitude * 32767.0f);
             samples[i * 2 + 0] = val; // L
             samples[i * 2 + 1] = val; // R
         }
