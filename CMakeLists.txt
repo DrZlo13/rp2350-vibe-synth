@@ -35,23 +35,32 @@ pico_sdk_init()
 
 # Add executable. Default name is the project name, version 0.1
 
-add_executable(2350-vibe-synth main.c )
+add_executable(${PROJECT_NAME} main.cpp )
 
-pico_set_program_name(2350-vibe-synth "2350-vibe-synth")
-pico_set_program_version(2350-vibe-synth "0.1")
+pico_set_program_name(${PROJECT_NAME} "2350-vibe-synth")
+pico_set_program_version(${PROJECT_NAME} "0.1")
 
 # Modify the below lines to enable/disable output over UART/USB
-pico_enable_stdio_uart(2350-vibe-synth 0)
-pico_enable_stdio_usb(2350-vibe-synth 0)
+pico_enable_stdio_uart(${PROJECT_NAME} 0)
+pico_enable_stdio_usb(${PROJECT_NAME} 0)
+
+
+set(CMSISCORE ${PICO_SDK_PATH}/src/rp2_common/cmsis/stub/CMSIS/Core)
+add_compile_definitions(USE_ARM_DSP)
+
+add_subdirectory(lib/DaisySP)
+add_subdirectory(lib/CMSIS-DSP)
+
+target_link_libraries(${PROJECT_NAME} DaisySP)
+target_link_libraries(${PROJECT_NAME} CMSISDSP)
 
 # Add the standard library to the build
-target_link_libraries(2350-vibe-synth
-        pico_stdlib)
-
+target_link_libraries(${PROJECT_NAME} pico_stdlib)
+ 
 # Add the standard include files to the build
-target_include_directories(2350-vibe-synth PRIVATE
-        ${CMAKE_CURRENT_LIST_DIR}
+target_include_directories(${PROJECT_NAME} PRIVATE
+    ${CMAKE_CURRENT_LIST_DIR}
 )
 
-pico_add_extra_outputs(2350-vibe-synth)
+pico_add_extra_outputs(${PROJECT_NAME})
 
