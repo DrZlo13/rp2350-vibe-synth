@@ -18,6 +18,8 @@
 static daisysp::Oscillator osc;
 static daisysp::Oscillator lfo;
 static daisysp::Adsr env;
+static daisysp::Adsr fenv; // filter envelope
+static daisysp::Svf svf;
 static volatile bool gate = false;
 static volatile float osc_freq = 440.0f;
 
@@ -85,6 +87,16 @@ int main() {
     env.SetSustainLevel(0.7f);
     env.SetReleaseTime(0.3f);
 
+    fenv.Init(SAMPLE_RATE);
+    fenv.SetAttackTime(0.005f);
+    fenv.SetDecayTime(0.4f);
+    fenv.SetSustainLevel(0.2f);
+    fenv.SetReleaseTime(0.5f);
+
+    svf.Init(SAMPLE_RATE);
+    svf.SetRes(0.1f);
+    svf.SetDrive(0.0f);
+
     audio_buffer_pool_t* pool = audio_init();
 
     while(true) {
@@ -100,8 +112,15 @@ int main() {
             // LFO -1..1 → pw 0.15..0.85 (не доходим до краёв чтобы не было артефактов)
             float pw = 0.5f + lfo.Process() * 0.35f;
             osc.SetPw(pw);
+
+            float fenv_val = fenv.Process(g);
+            // fenv 0..1 → cutoff 200..12000 Hz (экспоненциально)
+            float cutoff = 200.0f * powf(60.0f, fenv_val);
+            svf.SetFreq(cutoff);
+
             float amplitude = env.Process(g);
-            int16_t val = (int16_t)(osc.Process() * amplitude * 32767.0f);
+            svf.Process(osc.Process() * amplitude);
+            int16_t val = (int16_t)(svf.Low() * 32767.0f);
             samples[i * 2 + 0] = val; // L
             samples[i * 2 + 1] = val; // R
         }
