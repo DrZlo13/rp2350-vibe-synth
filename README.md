@@ -1,4 +1,4 @@
-# 2350 Vibe Synth
+# RP2350 Vibe Synth
 
 An experiment in LLM-assisted embedded development. I define the architecture and hardware specs — Claude Code writes the implementation.
 

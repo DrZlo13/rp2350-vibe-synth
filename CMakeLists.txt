@@ -54,6 +54,9 @@ pico_enable_stdio_usb(${PROJECT_NAME} 0)
 set(CMSISCORE ${PICO_SDK_PATH}/src/rp2_common/cmsis/stub/CMSIS/Core)
 add_compile_definitions(USE_ARM_DSP)
 
+# Maximum optimization: speed
+add_compile_options(-O3 -ffast-math)
+
 add_subdirectory(lib/DaisySP)
 add_subdirectory(lib/CMSIS-DSP)
 

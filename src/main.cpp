@@ -1,17 +1,18 @@
 #include "pico/stdlib.h"
 #include "tusb.h"
-#include "daisysp.h"
 #include "pico/audio_i2s.h"
 #include "SEGGER_RTT.h"
 
+#include "synth.h"
+
 #define LOG(...) SEGGER_RTT_printf(0, __VA_ARGS__)
-// RTT printf does not support floating point, so we need to split the float into integer and fractional parts for display
+// RTT printf does not support %f — split float into integer and fractional parts
 #define FI(f)    ((int)(f))
 #define FF1(f)   ((int)(((f) - (int)(f)) * 10))
-#define FF2(f)   ((int)(((f) - (int)(f)) * 100))
 
 #define SAMPLE_RATE   44100
 #define BUFFER_FRAMES 256
+#define VOICES        1
 
 // PCM5102A setup:
 //   SCK - solder bridge close (SCK to GND)
@@ -22,13 +23,7 @@
 #define I2S_PIN_DATA 2
 #define I2S_PIN_CLK  3 // BCLK=3, LRCLK=4
 
-static daisysp::Oscillator osc;
-static daisysp::Oscillator lfo;
-static daisysp::Adsr env;
-static daisysp::Adsr fenv; // filter envelope
-static daisysp::Svf svf;
-static volatile bool gate = false;
-static volatile float osc_freq = 440.0f;
+static Synth voices[VOICES];
 
 static audio_buffer_pool_t* audio_init() {
     static audio_format_t fmt = {
@@ -64,43 +59,22 @@ void tud_midi_rx_cb(uint8_t itf) {
         uint8_t vel = packet[3];
 
         if(status == 0x90 && vel > 0) { // Note On
-            osc_freq = daisysp::mtof(note);
-            gate = true;
-            // LOG("Note On  : %d  vel=%d  freq=%dHz\n", note, vel, (int)osc_freq);
+            for(auto& v : voices) {
+                v.note_on(note, vel);
+            }
         } else if(status == 0x80 || (status == 0x90 && vel == 0)) { // Note Off
-            gate = false;
-            // LOG("Note Off : %d\n", note);
+            for(auto& v : voices) {
+                v.note_off();
+            }
         }
     }
 }
 
 int main() {
     tusb_init();
-
-    osc.Init(SAMPLE_RATE);
-    osc.SetWaveform(daisysp::Oscillator::WAVE_POLYBLEP_SQUARE);
-    osc.SetAmp(1.0f);
-
-    lfo.Init(SAMPLE_RATE);
-    lfo.SetWaveform(daisysp::Oscillator::WAVE_TRI);
-    lfo.SetFreq(0.4f); // Hz
-    lfo.SetAmp(1.0f);
-
-    env.Init(SAMPLE_RATE);
-    env.SetAttackTime(0.01f);
-    env.SetDecayTime(0.1f);
-    env.SetSustainLevel(0.7f);
-    env.SetReleaseTime(0.3f);
-
-    fenv.Init(SAMPLE_RATE);
-    fenv.SetAttackTime(0.005f);
-    fenv.SetDecayTime(0.4f);
-    fenv.SetSustainLevel(0.2f);
-    fenv.SetReleaseTime(0.5f);
-
-    svf.Init(SAMPLE_RATE);
-    svf.SetRes(0.1f);
-    svf.SetDrive(0.0f);
+    for(auto& v : voices) {
+        v.init(SAMPLE_RATE);
+    }
 
     audio_buffer_pool_t* pool = audio_init();
 
@@ -131,22 +105,12 @@ int main() {
 
         uint64_t t0 = time_us_64();
 
-        osc.SetFreq(osc_freq);
-        bool g = gate;
         int16_t* samples = (int16_t*)buf->buffer->bytes;
         for(uint32_t i = 0; i < buf->max_sample_count; i++) {
-            // LFO -1..1 -> pw 0.15..0.85 (avoid artifacts near the edges)
-            float pw = 0.5f + lfo.Process() * 0.35f;
-            osc.SetPw(pw);
-
-            float fenv_val = fenv.Process(g);
-            // fenv 0..1 -> cutoff 200..12000 Hz (exponential)
-            float cutoff = 200.0f * powf(60.0f, fenv_val);
-            svf.SetFreq(cutoff);
-
-            float amplitude = env.Process(g);
-            svf.Process(osc.Process() * amplitude);
-            int16_t val = (int16_t)(svf.Low() * 32767.0f);
+            float mix = 0.0f;
+            for(auto& v : voices)
+                mix += v.process();
+            int16_t val = (int16_t)(mix * (32767.0f / VOICES));
             samples[i * 2 + 0] = val; // L
             samples[i * 2 + 1] = val; // R
         }
