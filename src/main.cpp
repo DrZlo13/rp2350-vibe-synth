@@ -66,10 +66,10 @@ void tud_midi_rx_cb(uint8_t itf) {
         if(status == 0x90 && vel > 0) { // Note On
             osc_freq = daisysp::mtof(note);
             gate = true;
-            LOG("Note On  : %d  vel=%d  freq=%dHz\n", note, vel, (int)osc_freq);
+            // LOG("Note On  : %d  vel=%d  freq=%dHz\n", note, vel, (int)osc_freq);
         } else if(status == 0x80 || (status == 0x90 && vel == 0)) { // Note Off
             gate = false;
-            LOG("Note Off : %d\n", note);
+            // LOG("Note Off : %d\n", note);
         }
     }
 }
@@ -115,22 +115,32 @@ int main() {
     LOG("I2S         : DATA=GP%d, BCLK=GP%d, LRCLK=GP%d\n", I2S_PIN_DATA, I2S_PIN_CLK, I2S_PIN_CLK + 1);
     LOG("Ready. Waiting for MIDI...\n\n");
 
+    // Time budget per buffer in microseconds
+    static const uint32_t BUDGET_US = BUFFER_FRAMES * 1000000u / SAMPLE_RATE;
+    // Number of buffers per log interval (~1 sec)
+    static const uint32_t LOG_INTERVAL = SAMPLE_RATE / BUFFER_FRAMES;
+
+    uint32_t buf_count = 0;
+    uint64_t load_acc_us = 0; // accumulated DSP time over the log interval
+
     while(true) {
         tud_task();
 
         audio_buffer_t* buf = take_audio_buffer(pool, false);
         if(!buf) continue;
 
+        uint64_t t0 = time_us_64();
+
         osc.SetFreq(osc_freq);
         bool g = gate;
         int16_t* samples = (int16_t*)buf->buffer->bytes;
         for(uint32_t i = 0; i < buf->max_sample_count; i++) {
-            // LFO -1..1 → pw 0.15..0.85 (не доходим до краёв чтобы не было артефактов)
+            // LFO -1..1 -> pw 0.15..0.85 (avoid artifacts near the edges)
             float pw = 0.5f + lfo.Process() * 0.35f;
             osc.SetPw(pw);
 
             float fenv_val = fenv.Process(g);
-            // fenv 0..1 → cutoff 200..12000 Hz (экспоненциально)
+            // fenv 0..1 -> cutoff 200..12000 Hz (exponential)
             float cutoff = 200.0f * powf(60.0f, fenv_val);
             svf.SetFreq(cutoff);
 
@@ -140,7 +150,19 @@ int main() {
             samples[i * 2 + 0] = val; // L
             samples[i * 2 + 1] = val; // R
         }
+
+        load_acc_us += time_us_64() - t0;
+
         buf->sample_count = buf->max_sample_count;
         give_audio_buffer(pool, buf);
+
+        if(++buf_count >= LOG_INTERVAL) {
+            // average DSP load over the interval in percent
+            uint32_t avg_us = (uint32_t)(load_acc_us / LOG_INTERVAL);
+            uint32_t load_pct = avg_us * 100 / BUDGET_US;
+            LOG("CPU load: %d%% (avg %d us / budget %d us)\n", load_pct, avg_us, BUDGET_US);
+            buf_count = 0;
+            load_acc_us = 0;
+        }
     }
 }
