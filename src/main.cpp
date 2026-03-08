@@ -3,7 +3,7 @@
 #include "pico/audio_i2s.h"
 #include "SEGGER_RTT.h"
 
-#include "synth.h"
+#include "voice_manager.h"
 
 #define LOG(...) SEGGER_RTT_printf(0, __VA_ARGS__)
 // RTT printf does not support %f — split float into integer and fractional parts
@@ -23,7 +23,7 @@
 #define I2S_PIN_DATA 2
 #define I2S_PIN_CLK  3 // BCLK=3, LRCLK=4
 
-static Synth voices[VOICES];
+static VoiceManager<VOICES, SAMPLE_RATE> voice_manager;
 
 static audio_buffer_pool_t* audio_init() {
     static audio_format_t fmt = {
@@ -59,23 +59,15 @@ void tud_midi_rx_cb(uint8_t itf) {
         uint8_t vel = packet[3];
 
         if(status == 0x90 && vel > 0) { // Note On
-            for(auto& v : voices) {
-                v.note_on(note, vel);
-            }
+            voice_manager.note_on(note, vel);
         } else if(status == 0x80 || (status == 0x90 && vel == 0)) { // Note Off
-            for(auto& v : voices) {
-                v.note_off();
-            }
+            voice_manager.note_off(note);
         }
     }
 }
 
 int main() {
     tusb_init();
-    for(auto& v : voices) {
-        v.init(SAMPLE_RATE, 16); // ctrl_div=16 -> control rate ~275 Hz
-    }
-
     audio_buffer_pool_t* pool = audio_init();
 
     LOG("=== 2350 Vibe Synth ===\n");
@@ -107,10 +99,7 @@ int main() {
 
         int16_t* samples = (int16_t*)buf->buffer->bytes;
         for(uint32_t i = 0; i < buf->max_sample_count; i++) {
-            float mix = 0.0f;
-            for(auto& v : voices)
-                mix += v.process();
-            int16_t val = (int16_t)(mix * (32767.0f / VOICES));
+            int16_t val = (int16_t)(voice_manager.process() * 32767.0f);
             samples[i * 2 + 0] = val; // L
             samples[i * 2 + 1] = val; // R
         }
